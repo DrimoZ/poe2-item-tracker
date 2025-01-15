@@ -1,5 +1,20 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponseHeaders } from 'axios';
 import { RateLimitManager } from './rate-limit.manager';
+import { MetricsDatabaseManager } from '../databases/requests/metrics-database.manager';
+
+interface PoESession {
+    poeSessId: string;
+    
+    startTime: number;
+    endTime: number;
+    expirationTime: number;
+
+    requestCount: number;
+    errorCount: number;
+
+    rateLimitHits: number;
+    averageRequestTime: number;
+}
 
 class AxiosService {
     
@@ -17,27 +32,28 @@ class AxiosService {
 
     // Static Properties
 
-    public static readonly sessionTimeout = 2 * 60 * 1000;
+    public static readonly POE_SESSION_KEY = 'POESESSID';
+    public static readonly POE_SESSION_DURATION = 10 * 60 * 1000;
 
     // Private Properties
 
-    private poesessid: string;
-    private poesessidExpires: number;
+    private _session: PoESession;
 
     private readonly _rateLimitManager: RateLimitManager;
+    private readonly _metricsDbManager: MetricsDatabaseManager;
 
     // Life Cycle
 
     private constructor() {
         this._rateLimitManager = RateLimitManager.instance;
+        this._metricsDbManager = MetricsDatabaseManager.instance;
 
-        this.poesessid = '';
-        this.poesessidExpires = 0;
+        this._session = this._metricsDbManager.getSession();
 
         this.initializeAxios();
     }
     
-    private initializeAxios(): void {
+    private async initializeAxios(): Promise<void> {
         const axiosInstance = axios.create({
             baseURL: 'https://www.pathofexile.com',
             timeout: 5000,
@@ -55,7 +71,8 @@ class AxiosService {
             (config) => {
                 
                 if (this.isSessionValid()) {
-                    config.headers['Cookie'] = `POESESSID=${this.poesessid}`;
+                    config.headers['Cookie'] = `${AxiosService.POE_SESSION_KEY}=${this._session.poeSessId}`;
+                    this._session.requestCount++;
                 }
 
                 return config;
@@ -64,25 +81,40 @@ class AxiosService {
         );
         
         axiosInstance.interceptors.response.use(
-            (response) => {
+            async (response) => {
                 if (response.headers) {
-                    this._rateLimitManager.updateRateLimitsFromHeader(response.headers as AxiosResponseHeaders);
+                    await this._rateLimitManager.updateRateLimitsFromHeader(response.headers as AxiosResponseHeaders);
 
                     if (response.headers['set-cookie']) {
-                        const poessid = response.headers['set-cookie'][0].split(';').find((cookie: string) => cookie.includes('POESESSID'));
-                        if (poessid) {
-                            const [key, value] = poessid.split('=');
-
-                            if (!this.isSessionValid()) {
-                                this.setSession(value, Date.now() + 10 * 60 * 1000);
-                                console.log('Session refreshed - New session:', this.poesessid);
-                            }
+                        const poeSessId = response.headers['set-cookie'][0].split(';').find((cookie: string) => cookie.includes(AxiosService.POE_SESSION_KEY));
+                        if (poeSessId) {
+                            const [key, value] = poeSessId.split('=');
+                            this._session = this._metricsDbManager.updateSession(this._session, value);
+                            this._session.requestCount++;
+                            console.log(`Session updated with new POE session ID: ${value}`);
                         }
                     }
                 }
+
+                // TODO : Update Average Request Time
+
                 return response;
             },
-            (error) => {
+            async (error) => {
+                this._session.errorCount++;
+                if (error.response) {
+                    if (error.response.status === 429) {
+                        this._session.rateLimitHits++;
+
+                        const retryAfter = error.response.headers['retry-after'];
+                        if (retryAfter) {
+                            const retryAfterMs = parseInt(retryAfter) * 1000;
+                            console.log(`Rate limit hit, retrying after ${retryAfterMs} ms...`);
+                            await new Promise(resolve => setTimeout(resolve, retryAfterMs));
+                        }
+                    }
+                }
+
                 console.error('Error:', error);
                 return Promise.reject(error);
             }
@@ -107,17 +139,24 @@ class AxiosService {
 
     // Interface (Session)
 
-    public setSession(poessid: string, expires: number): void {
-        this.poesessid = poessid;
-        this.poesessidExpires = expires;
-    }
-
     public isSessionValid(): boolean {
-        if (!this.poesessid || !this.poesessidExpires) return false;
-        if (this.poesessidExpires - AxiosService.sessionTimeout < Date.now() ) console.log('Session expired - Need to refresh');
+        // Session Id Check
+        if (!this._session.poeSessId || this._session.poeSessId === '') {
+            return false;
+        }
 
-        return this.poesessidExpires - AxiosService.sessionTimeout > Date.now();
+        // End Time Check
+        if (this._session.endTime > 0) {
+            return false;
+        }
+
+        // Expiration Time Check
+        if (this._session.expirationTime < Date.now()) {
+            return false;
+        }
+
+        return true;
     }
 }
 
-export { AxiosService };
+export { AxiosService, PoESession };

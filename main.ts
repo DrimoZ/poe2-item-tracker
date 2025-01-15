@@ -5,6 +5,7 @@
 
 import { AxiosRequestConfig } from 'axios';
 import { RequestResponse, RequestsManager } from './services/requests.manager';
+import { DatabaseManager } from './databases/database.manager';
 
 interface ItemCategory {
     id: string;
@@ -80,6 +81,9 @@ async function dataProcess() {
 async function main() {
     // Start the requests manager
     await requestsManager.start();
+
+    // Start Database Manager
+    await DatabaseManager.instance;
 
     while (true) {
         await dataProcess();
