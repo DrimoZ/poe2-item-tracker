@@ -73,6 +73,8 @@ class MetricsDatabaseManager {
 
     public updateSession(currentSession: PoESession, newPoeSessionId: string): PoESession {
         const currentTime = Date.now();
+        currentSession.endTime = currentTime;
+        currentSession.averageRequestTime = currentSession.requestCount > 0 ? Math.floor((currentSession.endTime - currentSession.startTime) / currentSession.requestCount) : 0;
 
         if (currentSession.poeSessId !== '') {
             this._dbManager.metricsDb.prepare(`
@@ -83,7 +85,10 @@ class MetricsDatabaseManager {
                     rate_limit_hits = ?,
                     average_request_time = ?
                 WHERE poe_sess_id = ?;
-            `).run(currentTime, currentSession.requestCount, currentSession.errorCount, currentSession.rateLimitHits, currentSession.averageRequestTime, currentSession.poeSessId);
+            `).run(
+                currentSession.endTime, currentSession.requestCount, currentSession.errorCount, currentSession.rateLimitHits, currentSession.averageRequestTime,
+                currentSession.poeSessId
+            );
         }
         
         let newSession: PoESession = {

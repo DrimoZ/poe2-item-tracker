@@ -4,10 +4,18 @@
 // fetch static data from api api/data/static
 
 import { AxiosRequestConfig } from 'axios';
+
+import { ItemCategory } from './models/category.model';
+import { Item } from './models/item.model';
+
 import { RequestResponse, RequestsManager } from './services/requests.manager';
 import { DatabaseManager } from './databases/database.manager';
 
-interface ItemCategory {
+import { staticCategories } from './static/categories.static';
+import { ItemDatabaseManager } from './databases/requests/item-database.manager';
+
+
+interface OldItemCategory {
     id: string;
     label: string;
     entries: {
@@ -27,7 +35,7 @@ async function dataProcess() {
         method: 'GET',
     }) as RequestResponse;
 
-    const itemCategories: ItemCategory[] = staticItemsData.response.data.result;
+    const itemCategories: OldItemCategory[] = staticItemsData.response.data.result;
     
     console.log("\n\n==============================================");
     console.log(`Starting to process items data ...\n`);
@@ -96,3 +104,105 @@ async function main() {
 main().catch((error) => {
     console.error('Error in main execution:', error);
 });
+
+
+const externalIgnoreRules = [
+    {
+        type: Item, ignore: true, rule: (obj: Item | ItemCategory) => {
+            if (obj instanceof Item) 
+                return (obj as Item).name.includes('shard');
+            return false;
+        }
+    },
+    {
+        type: ItemCategory, ignore: true, rule: (obj: Item | ItemCategory) => {
+            if (obj instanceof ItemCategory) 
+                return (obj as ItemCategory).id.includes('shard');
+            return false;
+        }
+    }
+]
+
+// Get data from the database
+function getDataFromDatabase(): Array<ItemCategory> {
+    const db = ItemDatabaseManager.instance;
+
+    for(const category of staticCategories) {
+        db.insertOrUpdateCategory(category);
+    }
+
+    return db.getCategoriesWithItems();
+}
+
+
+async function processAll() {
+    console.time(`|| All categories fetched in`);
+
+    const itemCategories = getDataFromDatabase();
+
+    for (const itemCategory of itemCategories) {
+        await processCategory(itemCategory);
+    }
+
+    console.log("\n||==============================================\n||");
+    console.timeEnd(`|| All categories fetched in`);
+    console.log("||\n||==============================================\n\n\n");
+
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+}
+
+// Process One Category
+async function processCategory(itemCategory: ItemCategory) {
+    console.log("\n==============================================");
+    console.log(`Starting to process category: ${itemCategory.id} ...\n`);
+    console.time(`${itemCategory.id} category fetched in`);
+
+    if (itemCategory.isIgnored) {
+        console.log(`Category is ignored. Skipping ...`);
+        return;
+    }
+
+    for (const rule of externalIgnoreRules) {
+        if (itemCategory instanceof rule.type && rule.rule(itemCategory)) {
+            console.log(`Category is ignored by external rule. Skipping ...`);
+            return;
+        }
+    }
+
+    for (const item of itemCategory.getUnignoredItems()) {
+        await processItem(item);
+    }
+
+    console.timeEnd(`${itemCategory.id} category fetched in`);
+}
+
+// Process One Item
+async function processItem(item: Item) {
+    console.log("\n\t==============================================");
+    console.log(`\tStarting to process item: ${item.name} ...\n`);
+    console.time(`\t${item.name} fetched in`);
+
+    for (const rule of externalIgnoreRules) {
+        if (item instanceof rule.type && rule.rule(item)) {
+            console.log(`\tItem is ignored by external rule. Skipping ...`);
+            return;
+        }
+    }
+
+    // Process the item
+    const response = await requestsManager.addRequest({
+        url: '/api/trade2/exchange/Standard',
+        method: 'POST',
+        data: {
+            "query": {
+                "status": {
+                    "option": "Online"
+                },
+                "want": [item.id],
+                "have": ["exalted"]
+            },
+        } as AxiosRequestConfig,
+    }) as RequestResponse;
+
+    console.timeEnd(`\t${item.name} fetched in`);
+}

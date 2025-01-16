@@ -103,27 +103,48 @@ class DatabaseManager {
         
         db.prepare(
             `CREATE TABLE IF NOT EXISTS item_categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                label TEXT NOT NULL UNIQUE
+                id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                ignored BOOLEAN NOT NULL DEFAULT FALSE
+            )`
+        ).run();
+
+        db.prepare(
+            `CREATE TABLE IF NOT EXISTS item_category_labels (
+                category_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                UNIQUE (category_id, label),
+                FOREIGN KEY (category_id) REFERENCES item_categories (id) ON DELETE CASCADE
             )`
         ).run();
         
         db.prepare(
             `CREATE TABLE IF NOT EXISTS items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                typeLine TEXT NOT NULL,
-                baseType TEXT NOT NULL,
-                descrText TEXT NOT NULL,
-                rarity TEXT NOT NULL,
+
+                type_line TEXT NOT NULL,
+                base_type TEXT NOT NULL,
+                max_stack_size INTEGER NOT NULL,
                 icon TEXT NOT NULL,
-                iLvl INTEGER NOT NULL,
-                maxStackSize INTEGER NOT NULL,
-                category_id INTEGER NOT NULL,
+
+                rarity TEXT NOT NULL,
+                ilvl INTEGER NOT NULL,
+
+                ignored BOOLEAN NOT NULL DEFAULT FALSE,
+                category_id TEXT NOT NULL,
                 FOREIGN KEY (category_id) REFERENCES item_categories (id) ON DELETE CASCADE
             )`
         ).run();
         
+        db.prepare(
+            `CREATE TABLE IF NOT EXISTS item_descriptions (
+                item_id TEXT NOT NULL,
+                descr_text TEXT NOT NULL,
+                UNIQUE (item_id, descr_text),
+                FOREIGN KEY (item_id) REFERENCES items (id) ON DELETE CASCADE
+            )`
+        )
         
         
         console.log("Items database initialized at:", dbPath);

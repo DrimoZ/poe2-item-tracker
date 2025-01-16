@@ -39,6 +39,7 @@ class RequestsManager {
         addedAt: number;
         startedAt?: number;
         finishedAt?: number;
+        tryCount?: number;
     }[] = [];
 
     private _isRunning: boolean;
@@ -132,6 +133,8 @@ class RequestsManager {
 
             this.callQueue.shift();
         } catch (error) {
+            nextRequest.tryCount = nextRequest.tryCount ? nextRequest.tryCount + 1 : 1;
+            await new Promise((resolve) => setTimeout(resolve, Math.pow(2, nextRequest.tryCount ?? 1) * 1000));
             console.error('Error processing request:', error);
         }
     }
