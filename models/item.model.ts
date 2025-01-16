@@ -71,6 +71,8 @@ class Item {
         this._descrText = fields.descrText ?? [];
 
         this._rarity = fields.rarity ?? ItemRarity.NONE;
+
+        if (fields.icon && fields.icon?.startsWith('/gen/')) fields.icon = 'https://web.poecdn.com' + fields.icon;
         this._icon = fields.icon ?? Item.undefinedString;
 
         this._iLvl = fields.iLvl ?? Item.undefinedNumber;
@@ -90,9 +92,7 @@ class Item {
     // Interface (Equals)
 
     public equals(item: Item): boolean {
-        return this._id === item.id && this._name === item.name && this._typeLine === item.typeLine 
-        && this._baseType === item.baseType && this._rarity === item.rarity 
-        && this._iLvl === item.iLvl;
+        return this._id === item.id;
     }
 
     // Getters

@@ -9,93 +9,32 @@ import { ItemCategory } from './models/category.model';
 import { Item } from './models/item.model';
 
 import { RequestResponse, RequestsManager } from './services/requests.manager';
-import { DatabaseManager } from './databases/database.manager';
-
-import { staticCategories } from './static/categories.static';
 import { ItemDatabaseManager } from './databases/requests/item-database.manager';
+
 import { staticItems } from './static/items.static';
+import { staticCategories } from './static/categories.static';
 
 
-interface OldItemCategory {
-    id: string;
-    label: string;
-    entries: {
-        id: string;
-        text: string;
-        image: string;
-    }[];
-}
 
-const requestsManager = RequestsManager.instance;
+const requestsManager: RequestsManager = RequestsManager.instance;
+const itemDatabaseManager: ItemDatabaseManager = ItemDatabaseManager.instance;
 
-async function dataProcess() {
-
-    // Fetch static data
-    const staticItemsData = await requestsManager.addRequest({
-        url: '/api/trade2/data/static',
-        method: 'GET',
-    }) as RequestResponse;
-
-    const itemCategories: OldItemCategory[] = staticItemsData.response.data.result;
-    
-    console.log("\n\n==============================================");
-    console.log(`Starting to process items data ...\n`);
-
-    console.time(`Items data fetched in`);
-
-    // Process the item categories
-    for (const category of itemCategories) {
-        const categoryEntries = category.entries;
-        const categoryId = category.id;
-
-        console.log("\n\n==============================================");
-        console.log(`Starting to process category: ${category.label} ...\n`);
-        console.time(`${category.label} fetched in`, );
-
-        // Process the category entries
-        for (const entry of categoryEntries) {
-            if (entry.id.includes('sep') || entry.id.includes('shard')) continue;
-            
-            // Process the entry
-            console.time(`\tCategory: ${categoryId}, Entry: ${entry.id}, Text: ${entry.text}`);
-
-            const a = await requestsManager.addRequest({
-                url: '/api/trade2/exchange/Standard',
-                method: 'POST',
-                data: {
-                    "query": {
-                        "status": {
-                            "option": "Online"
-                        },
-                        "want": [entry.id],
-                        "have": ["exalted"]
-                    },
-                } as AxiosRequestConfig,
-            }) as RequestResponse;
-
-            console.timeEnd(`\tCategory: ${categoryId}, Entry: ${entry.id}, Text: ${entry.text}`);
-
-            // console.log(a.response.data)
-        }
-
-        console.log(`\n`);
-        console.timeEnd(`${category.label} fetched in`, );
-
-    }
-
-    console.log("\n");
-    console.timeEnd(`Items data fetched in`);
-}
+let isRunning: boolean = true;
 
 async function main() {
     // Start the requests manager
     await requestsManager.start();
 
-    // Start Database Manager
-    await DatabaseManager.instance;
+    // Delay for 10 seconds
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
 
-    while (true) {
-        // await dataProcess();
+    // Process the static data
+    await processStaticData();
+
+    // Delay for 10 seconds
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+
+    while (isRunning) {
         await processAll();
     }
 
@@ -127,8 +66,6 @@ const externalIgnoreRules = [
 
 // Get data from the database
 async function  getDataFromDatabase(): Promise<Array<ItemCategory>> {
-    const db = ItemDatabaseManager.instance;
-
     for(const category of staticCategories) {
         let si = staticItems.filter(si => si.categoryId === category.id);
         if (si) {
@@ -137,18 +74,64 @@ async function  getDataFromDatabase(): Promise<Array<ItemCategory>> {
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1_000));
-        await db.insertOrUpdateCategory(category);
+        await itemDatabaseManager.insertOrUpdateCategory(category);
     }
 
     await new Promise((resolve) => setTimeout(resolve, 10_000));
-    return db.getCategoriesWithItems();
+    return itemDatabaseManager.getCategoriesWithItems();
+}
+
+// Fetch Static Data from API
+async function fetchStaticData(): Promise<RequestResponse> {
+    const response = await requestsManager.addRequest({
+        url: '/api/trade2/data/static',
+        method: 'GET',
+    }) as RequestResponse;
+
+    return response;
+}
+
+// Process Static Data to Database
+async function processStaticData() {
+
+    console.log("\nProcessing static data ...\n");
+
+    const response = await fetchStaticData();
+    let dbCategories = await getDataFromDatabase();
+
+    for (const category of response.response.data.result) {
+        let itemCategory = dbCategories.find((cat) => cat.knowLabels.includes(category.label) || cat.knowLabels.includes(category.id) || cat.id === category.id.toLowerCase());
+
+        if (!itemCategory) {
+            console.log('Category not found in database. Creating new category ...');
+            itemCategory = new ItemCategory({
+                id: category.id.toLowerCase(),
+                displayName: category.label,
+                knowLabels: [category.label, category.id],
+                ignored: false
+            });
+        }
+
+        itemCategory.addItems(category.entries.filter((entry: any) => !entry.id.includes('sep')).map((entry: any) => {
+            return new Item({
+                id: entry.id,
+                baseType: entry.text,
+                icon: entry.image,
+            });
+        }));
+
+        await itemDatabaseManager.insertOrUpdateCategory(itemCategory);
+        console.log(`Category ${itemCategory.displayName} has ${itemCategory.items.length} items and ${itemCategory.ignoredItems.length} ignored items`);
+    }
 }
 
 
+
+// Process All Categories
 async function processAll() {
     console.time(`|| All categories fetched in`);
 
-    const itemCategories = await getDataFromDatabase();
+    const itemCategories = await itemDatabaseManager.getCategoriesWithItems();
 
     for (const itemCategory of itemCategories) {
         await processCategory(itemCategory);

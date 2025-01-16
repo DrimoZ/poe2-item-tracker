@@ -54,7 +54,7 @@ class ItemDatabaseManager {
             return new ItemCategory({
                 id: itemCategory.id,
                 displayName: itemCategory.displayName,
-                knowLabels: itemCategory.labels.split(';'),
+                knowLabels: itemCategory.labels?.split(';') ?? [],
                 ignored: itemCategory.ignored === 1
             });
         });
@@ -66,8 +66,6 @@ class ItemDatabaseManager {
         for (const itemCategory of itemCategories) {
             await itemCategory.addItems(this.getItemsByCategory(itemCategory.id, false));
             await itemCategory.addIgnoredItems(this.getItemsByCategory(itemCategory.id, true));
-
-            console.log(`Category ${itemCategory.displayName} has ${itemCategory.items.length} items and ${itemCategory.ignoredItems.length} ignored items`);
         }
 
         return itemCategories;
@@ -118,8 +116,6 @@ class ItemDatabaseManager {
             iLvl?: number,
             maxStackSize?: number
         }>;
-
-        console.log(`Found ${items.length} items for category ${categoryId} and ignored ${ignored}`);
 
         return items.map((item) => {
             return new Item({
