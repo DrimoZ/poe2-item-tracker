@@ -13,6 +13,7 @@ import { DatabaseManager } from './databases/database.manager';
 
 import { staticCategories } from './static/categories.static';
 import { ItemDatabaseManager } from './databases/requests/item-database.manager';
+import { staticItems } from './static/items.static';
 
 
 interface OldItemCategory {
@@ -94,7 +95,8 @@ async function main() {
     await DatabaseManager.instance;
 
     while (true) {
-        await dataProcess();
+        // await dataProcess();
+        await processAll();
     }
 
     // Stop the requests manager
@@ -124,13 +126,21 @@ const externalIgnoreRules = [
 ]
 
 // Get data from the database
-function getDataFromDatabase(): Array<ItemCategory> {
+async function  getDataFromDatabase(): Promise<Array<ItemCategory>> {
     const db = ItemDatabaseManager.instance;
 
     for(const category of staticCategories) {
-        db.insertOrUpdateCategory(category);
+        let si = staticItems.filter(si => si.categoryId === category.id);
+        if (si) {
+            await category.addIgnoredItems(si.filter(si => si.ignored).map(si => si.item));
+            await category.addItems(si.filter(si => !si.ignored).map(si => si.item));
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        await db.insertOrUpdateCategory(category);
     }
 
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
     return db.getCategoriesWithItems();
 }
 
@@ -138,7 +148,7 @@ function getDataFromDatabase(): Array<ItemCategory> {
 async function processAll() {
     console.time(`|| All categories fetched in`);
 
-    const itemCategories = getDataFromDatabase();
+    const itemCategories = await getDataFromDatabase();
 
     for (const itemCategory of itemCategories) {
         await processCategory(itemCategory);
@@ -154,8 +164,8 @@ async function processAll() {
 // Process One Category
 async function processCategory(itemCategory: ItemCategory) {
     console.log("\n==============================================");
-    console.log(`Starting to process category: ${itemCategory.id} ...\n`);
-    console.time(`${itemCategory.id} category fetched in`);
+    console.log(`Starting to process category: ${itemCategory.displayName} (${itemCategory.items.length} items) ...\n`);
+    console.time(`${itemCategory.displayName} category fetched in`);
 
     if (itemCategory.isIgnored) {
         console.log(`Category is ignored. Skipping ...`);
@@ -173,23 +183,29 @@ async function processCategory(itemCategory: ItemCategory) {
         await processItem(item);
     }
 
-    console.timeEnd(`${itemCategory.id} category fetched in`);
+    console.timeEnd(`${itemCategory.displayName} category fetched in`);
 }
 
 // Process One Item
 async function processItem(item: Item) {
-    console.log("\n\t==============================================");
-    console.log(`\tStarting to process item: ${item.name} ...\n`);
-    console.time(`\t${item.name} fetched in`);
+    // console.log("\n\t==============================================");
+    // console.log(`\tStarting to process item: ${item.displayName()} ...\n`);
+    console.time(`\t${item.displayName()} fetched in`);
 
     for (const rule of externalIgnoreRules) {
         if (item instanceof rule.type && rule.rule(item)) {
-            console.log(`\tItem is ignored by external rule. Skipping ...`);
+            console.log(`\t${item.displayName()} is ignored by external rule. Skipping ...`);
             return;
         }
     }
 
     // Process the item
+    const response = item.fetchMethod === 'exchange' ? await processExchange(item) : await processSearch(item);
+    console.timeEnd(`\t${item.displayName()} fetched in`);
+}
+
+
+async function processExchange(item: Item) {
     const response = await requestsManager.addRequest({
         url: '/api/trade2/exchange/Standard',
         method: 'POST',
@@ -204,5 +220,22 @@ async function processItem(item: Item) {
         } as AxiosRequestConfig,
     }) as RequestResponse;
 
-    console.timeEnd(`\t${item.name} fetched in`);
+    return response;
+}
+
+async function processSearch(item: Item) {
+    const response = await requestsManager.addRequest({
+        url: '/api/trade2/search/Standard',
+        method: 'POST',
+        data: {
+            "query": {
+                "status": {
+                    "option": "Online"
+                },
+                "type": item.baseType
+            },
+        } as AxiosRequestConfig,
+    }) as RequestResponse;
+
+    return response;
 }
