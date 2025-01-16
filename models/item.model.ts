@@ -7,6 +7,11 @@ enum ItemRarity {
     NONE = 'None'
 }
 
+enum FetchMethod {
+    EXCHANGE = 'exchange',
+    SEARCH = 'search'
+}
+
 class Item {
 
     // Static Properties
@@ -18,6 +23,7 @@ class Item {
 
     private _id: string;
     private _name: string;
+    private _fetchMethod: FetchMethod;
 
     private _typeLine: string;
     private _baseType: string;
@@ -34,6 +40,8 @@ class Item {
     constructor(fields: {
         id: string;
         name?: string,
+        fetchMethod?: FetchMethod
+
         typeLine?: string,
         baseType?: string,
         descrText?: Array<string>,
@@ -43,6 +51,7 @@ class Item {
         maxStackSize?: number
     }) {
         this._id = fields.id;
+        this._fetchMethod = fields.fetchMethod ?? FetchMethod.SEARCH;
 
         if (!fields.typeLine && fields.baseType) {
             this._typeLine = this._baseType = fields.baseType;
@@ -58,20 +67,24 @@ class Item {
             throw new Error('Item must have at least one of the following: typeLine or baseType');
         }
 
-        this._name = fields.name || Item.undefinedString;
-        this._descrText = fields.descrText || [];
+        this._name = fields.name ?? Item.undefinedString;
+        this._descrText = fields.descrText ?? [];
 
-        this._rarity = fields.rarity || ItemRarity.NONE;
-        this._icon = fields.icon || Item.undefinedString;
+        this._rarity = fields.rarity ?? ItemRarity.NONE;
+        this._icon = fields.icon ?? Item.undefinedString;
 
-        this._iLvl = fields.iLvl || Item.undefinedNumber;
-        this._maxStackSize = fields.maxStackSize || Item.undefinedNumber;
+        this._iLvl = fields.iLvl ?? Item.undefinedNumber;
+        this._maxStackSize = fields.maxStackSize ?? Item.undefinedNumber;
     }
 
     // Interface (To String)
 
     public displayName(): string {
         return (this._name !== Item.undefinedString ? this._name + ' ' : '') + this._typeLine;
+    }
+
+    private toString(): string {
+        return `ID: ${this._id}, Name: ${this._name}, TypeLine: ${this._typeLine}, BaseType: ${this._baseType}, Rarity: ${this._rarity}, iLvl: ${this._iLvl}, MaxStackSize: ${this._maxStackSize}`;
     }
 
     // Interface (Equals)
@@ -86,6 +99,10 @@ class Item {
 
     public get id(): string {
         return this._id;
+    }
+
+    public get fetchMethod(): FetchMethod {
+        return this._fetchMethod;
     }
 
     public get name(): string {
@@ -121,4 +138,4 @@ class Item {
     }
 }
 
-export { Item, ItemRarity };
+export { Item, ItemRarity, FetchMethod };

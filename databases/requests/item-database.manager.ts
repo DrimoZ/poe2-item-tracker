@@ -1,5 +1,5 @@
 import { ItemCategory } from "../../models/category.model";
-import { Item, ItemRarity } from "../../models/item.model";
+import { FetchMethod, Item, ItemRarity } from "../../models/item.model";
 import { DatabaseManager } from "../database.manager";
 
 class ItemDatabaseManager {
@@ -33,9 +33,10 @@ class ItemDatabaseManager {
             `SELECT 
                 c.id as id,
                 c.display_name as displayName,
-                GROUP_CONCAT(l.label ORDER BY l.label SEPARATOR ';') AS labels
+                c.ignored,
+                GROUP_CONCAT(l.label, ';') as labels
             FROM 
-                item_category c
+                item_categories c
             LEFT JOIN 
                 item_category_labels l
             ON 
@@ -45,6 +46,7 @@ class ItemDatabaseManager {
         ).all() as Array<{
             id: string;
             displayName: string;
+            ignored: number;
             labels: string;
         }>;
 
@@ -52,17 +54,20 @@ class ItemDatabaseManager {
             return new ItemCategory({
                 id: itemCategory.id,
                 displayName: itemCategory.displayName,
-                knowLabels: itemCategory.labels.split(';')
+                knowLabels: itemCategory.labels.split(';'),
+                ignored: itemCategory.ignored === 1
             });
         });
     }
 
-    public getCategoriesWithItems(): Array<ItemCategory> {
+    public async getCategoriesWithItems(): Promise<Array<ItemCategory>> {
         const itemCategories = this.getCategories();
 
         for (const itemCategory of itemCategories) {
-            itemCategory.addItems(this.getItemsByCategory(itemCategory.id, false));
-            itemCategory.addIgnoredItems(this.getItemsByCategory(itemCategory.id, true));
+            await itemCategory.addItems(this.getItemsByCategory(itemCategory.id, false));
+            await itemCategory.addIgnoredItems(this.getItemsByCategory(itemCategory.id, true));
+
+            console.log(`Category ${itemCategory.displayName} has ${itemCategory.items.length} items and ${itemCategory.ignoredItems.length} ignored items`);
         }
 
         return itemCategories;
@@ -83,29 +88,28 @@ class ItemDatabaseManager {
             `SELECT 
                 i.id as id,
                 i.name as name,
-
+                i.fetch_method as fetchMethod,
                 i.type_line as typeLine,
                 i.base_type as baseType,
-                GROUP_CONCAT(d.descr_text ORDER BY d.descr_text SEPARATOR ';') as descrText,
-
+                GROUP_CONCAT(d.descr_text, ';') as descrText,
                 i.rarity as rarity,
                 i.icon as icon,
-
                 i.ilvl as iLvl,
                 i.max_stack_size as maxStackSize
             FROM 
                 items i
             LEFT JOIN 
-                item_category_labels l
+                item_descriptions d
             ON 
-                c.id = l.category_id
+                i.id = d.item_id
             WHERE
                 i.category_id = ? AND i.ignored = ?
             GROUP BY 
-                c.id, c.display_name;`
-        ).all(categoryId, ignored) as Array<{
+                i.id, i.name;`
+        ).all(categoryId, ignored ? 1 : 0) as Array<{
             id: string;
             name?: string,
+            fetchMethod?: string,
             typeLine?: string,
             baseType?: string,
             descrText?: string,
@@ -115,10 +119,13 @@ class ItemDatabaseManager {
             maxStackSize?: number
         }>;
 
+        console.log(`Found ${items.length} items for category ${categoryId} and ignored ${ignored}`);
+
         return items.map((item) => {
             return new Item({
                 id: item.id,
                 name: item.name,
+                fetchMethod: item.fetchMethod as FetchMethod,
                 typeLine: item.typeLine,
                 baseType: item.baseType,
                 descrText: item.descrText?.split(';') || [],
@@ -143,10 +150,10 @@ class ItemDatabaseManager {
     private insertCategory(category: ItemCategory): void {
         this._dbManager.itemsDb.prepare(
             `INSERT INTO 
-                item_category (id, display_name, ignored)
+                item_categories (id, display_name, ignored)
             VALUES 
                 (?, ?, ?);`
-        ).run(category.id, category.displayName, category.isIgnored);
+        ).run(category.id, category.displayName, category.isIgnored ? 1 : 0);
 
         this.insertKnownLabelsForCategory(category);
 
@@ -162,12 +169,13 @@ class ItemDatabaseManager {
     private updateCategory(category: ItemCategory): void {
         this._dbManager.itemsDb.prepare(
             `UPDATE 
-                item_category
+                item_categories
             SET 
-                display_name = ?
+                display_name = ?,
+                ignored = ?
             WHERE 
                 id = ?;`
-        ).run(category.displayName, category.id);
+        ).run(category.displayName, category.isIgnored ? 1 : 0, category.id);
 
         this.insertKnownLabelsForCategory(category);
 
@@ -183,7 +191,7 @@ class ItemDatabaseManager {
     private insertKnownLabelsForCategory(category: ItemCategory): void {
         for (const label of category.knowLabels) {
             this._dbManager.itemsDb.prepare(
-                `INSERT INTO 
+                `INSERT OR IGNORE INTO 
                     item_category_labels (category_id, label)
                 VALUES 
                     (?, ?);`
@@ -196,7 +204,7 @@ class ItemDatabaseManager {
             `SELECT 
                 c.id
             FROM 
-                item_category c
+                item_categories c
             WHERE 
                 c.id = ?;`
         ).get(category.id);
@@ -207,12 +215,13 @@ class ItemDatabaseManager {
     private insertItem(item: Item, categoryId: string, ignored: boolean): void {
         this._dbManager.itemsDb.prepare(
             `INSERT INTO 
-                items (id, name, type_line, base_type, rarity, icon, ilvl, max_stack_size, category_id, ignored)
+                items (id, name, fetch_method, type_line, base_type, rarity, icon, ilvl, max_stack_size, category_id, ignored)
             VALUES 
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
         ).run(
             item.id,
             item.name,
+            item.fetchMethod as string,
             item.typeLine,
             item.baseType,
             item.rarity,
@@ -220,7 +229,7 @@ class ItemDatabaseManager {
             item.iLvl,
             item.maxStackSize,
             categoryId,
-            ignored
+            ignored ? 1 : 0
         );
 
         this.insertItemDescription(item);
@@ -233,6 +242,7 @@ class ItemDatabaseManager {
             SET 
                 name = ?,
                 type_line = ?,
+                fetch_method = ?,
                 base_type = ?,
                 rarity = ?,
                 icon = ?,
@@ -245,13 +255,14 @@ class ItemDatabaseManager {
         ).run(
             item.name,
             item.typeLine,
+            item.fetchMethod as string,
             item.baseType,
             item.rarity,
             item.icon,
             item.iLvl,
             item.maxStackSize,
             categoryId,
-            ignored,
+            ignored ? 1 : 0,
             item.id
         );
 
@@ -261,7 +272,7 @@ class ItemDatabaseManager {
     private insertItemDescription(item: Item): void {
         for (const descrText of item.descrText) {
             this._dbManager.itemsDb.prepare(
-                `INSERT INTO 
+                `INSERT OR IGNORE INTO 
                     item_descriptions (item_id, descr_text)
                 VALUES 
                     (?, ?);`
@@ -277,17 +288,6 @@ class ItemDatabaseManager {
                 items i
             WHERE 
                 i.id = ?;`
-        ).get(item.id);
-    }
-
-    private isItemIgnored(item: Item): boolean {
-        return !!this._dbManager.itemsDb.prepare(
-            `SELECT 
-                i.id
-            FROM 
-                items i
-            WHERE 
-                i.id = ? and i.ignored = 1;`
         ).get(item.id);
     }
 }

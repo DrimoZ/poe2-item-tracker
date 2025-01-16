@@ -113,6 +113,7 @@ class DatabaseManager {
             `CREATE TABLE IF NOT EXISTS item_category_labels (
                 category_id TEXT NOT NULL,
                 label TEXT NOT NULL,
+                ignored BOOLEAN NOT NULL DEFAULT FALSE,
                 UNIQUE (category_id, label),
                 FOREIGN KEY (category_id) REFERENCES item_categories (id) ON DELETE CASCADE
             )`
@@ -122,6 +123,7 @@ class DatabaseManager {
             `CREATE TABLE IF NOT EXISTS items (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                fetch_method NOT NULL DEFAULT 'search',
 
                 type_line TEXT NOT NULL,
                 base_type TEXT NOT NULL,
@@ -144,7 +146,7 @@ class DatabaseManager {
                 UNIQUE (item_id, descr_text),
                 FOREIGN KEY (item_id) REFERENCES items (id) ON DELETE CASCADE
             )`
-        )
+        ).run();
         
         
         console.log("Items database initialized at:", dbPath);
