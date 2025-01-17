@@ -59,6 +59,8 @@ class DatabaseManager {
         await this.setupMetricsDb();
         await this.setupItemsDb();
         await this.setupRawDataDb();
+
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
     }
     
     
