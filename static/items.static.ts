@@ -43,6 +43,6 @@ export const staticItems: Array<{
             maxStackSize: 20,
             descrText: ['Right click this item then left click a Skill Gem to apply it.', 'Adds a Support Gem Socket to a Skill Gem with 2 Support Gem Sockets']
         })
-    },
+    }
 ];
 
